@@ -1,0 +1,16 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     ,        0x1000,
+# Grown from 2048k -> 4096k (2026-09-11) to fit the ESP-SR voice-control
+# code (AFE/wakenet/multinet inference) added on top of the existing app -
+# the recognition models themselves live in the separate "model" partition
+# below, this growth is just for the compiled library/app code.
+factory,  app,  factory, ,        4096k,
+storage,  data, spiffs,  ,        512k,
+# ESP-SR's wake-word + command-recognition models (English only, one wake
+# word - see idf_component.yml). Espressif's own factory_demo for this
+# board needs 8600k for two languages x multiple wake words combined; this
+# is a fraction of that, but sized generously since the 16MB chip has
+# plenty of headroom (~7MB still free after this) and under-provisioning
+# would just fail the build.
+model,    data, spiffs,  ,        4096k,

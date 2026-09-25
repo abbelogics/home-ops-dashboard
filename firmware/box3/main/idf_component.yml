@@ -1,0 +1,26 @@
+## IDF Component Manager Manifest File
+#
+# All versions here are pinned EXACTLY (no ^/~ ranges). A floating
+# constraint (e.g. espressif/esp-box-3: ^1.1.3) silently pulled a newer
+# esp-box-3 release that switched to esp_lvgl_port v2 / LVGL v9 mid-session,
+# which broke button-driver compilation and renamed LVGL's sprintf Kconfig
+# options. Everything below is the exact combination that's been tested
+# working on real hardware (display, touch, sensor, WiFi/SNTP).
+dependencies:
+  idf: ">=5.0"
+  espressif/aht20: 0.1.0~1
+  espressif/at581x: 0.1.0~1
+  # Depend on the BOX-3 package directly (not the shared multi-board "bsp"
+  # wrapper in the esp-box repo) so the esp-box/esp-box-lite variant
+  # packages never enter the build at all - see CMakeLists.txt.
+  espressif/esp-box-3: 1.2.0~2
+  espressif/esp_lvgl_port: 2.7.2
+  lvgl/lvgl: 9.5.0
+  # esp-box-3's own manifest allows any button >=2.5, but older esp-box-3
+  # releases only match the pre-4.x button API. Pinned defensively.
+  espressif/button: 3.5.0
+  # Voice control (wake word "Hi, ESP" + English command recognition) -
+  # pinned to the same minor line (1.4.x) that Espressif's own factory_demo
+  # for this exact board uses (~/esp/esp-box/examples/factory_demo), which
+  # is the API reference this project's voice code is adapted from.
+  espressif/esp-sr: 1.4.2

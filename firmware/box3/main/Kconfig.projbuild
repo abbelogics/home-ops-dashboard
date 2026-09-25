@@ -1,0 +1,37 @@
+menu "Home Ops Dashboard Configuration"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default "your-wifi-ssid"
+        help
+            SSID (network name) the BOX-3 connects to for SNTP time sync
+            and, later, the n8n JSON API / MQTT broker on PiLab.
+
+    config WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            WPA2 password for WIFI_SSID.
+
+    config TOTP_SECRET_BASE32
+        string "TOTP shared secret (base32)"
+        default ""
+        help
+            Base32 TOTP secret for the on-device authenticator screen (see
+            totp_screen.c) - a second, independent enrollment of the same
+            account already in Microsoft Authenticator, not a copy of an
+            existing app's stored secret (TOTP apps don't expose that).
+            Real value lives in sdkconfig.local (gitignored), same pattern
+            as WIFI_PASSWORD above - never put the real secret here.
+
+    config MQTT_PASSWORD
+        string "MQTT password (Mosquitto on PiLab)"
+        default ""
+        help
+            Password for the "homeops" MQTT user (see homeops_mqtt.c) -
+            Mosquitto started requiring auth 2026-09-22, previously
+            allow_anonymous. Same gitignored-sdkconfig.local treatment as
+            WIFI_PASSWORD/TOTP_SECRET_BASE32 above - never put the real
+            secret here.
+
+endmenu

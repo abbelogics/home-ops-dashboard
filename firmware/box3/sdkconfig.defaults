@@ -1,0 +1,106 @@
+CONFIG_IDF_TARGET="esp32s3"
+
+CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
+
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_SPIRAM_SUPPORT=y
+
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+CONFIG_LV_COLOR_16_SWAP=y
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_18=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_26=y
+CONFIG_LV_FONT_MONTSERRAT_22=y
+CONFIG_LV_FONT_MONTSERRAT_32=y
+CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_FONT_MONTSERRAT_44=y
+# LVGL 9's built-in sprintf doesn't support %f at all (no separate float
+# toggle like v8 had); use the real libc snprintf instead.
+CONFIG_LV_USE_CLIB_SPRINTF=y
+
+# Airline logo images from SPIFFS
+CONFIG_LV_USE_LODEPNG=y
+CONFIG_LV_USE_FS_POSIX=y
+# 83 == 'S'
+CONFIG_LV_FS_POSIX_LETTER=83
+
+# BSP default (5) was a plausible suspect while root-causing the
+# 2026-09-15 weather condition icon bug (see home_screen.c's comment on
+# s_weather_icon for the actual cause and fix - a large native PNG decode
+# limit, unrelated to this) - ruled out (raising it alone didn't change
+# the outcome) but left raised anyway: the Home screen alone now has 5+
+# image assets live at once (condition icon, wind, humidity, sun, sun
+# arrow) plus the aircraft logo, well past what the original default of 5
+# was sized for.
+CONFIG_BSP_SPIFFS_MAX_FILES=20
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# BSP (espressif/esp-box-3 package's own Kconfig)
+CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=10
+
+# WiFi (SNTP time; later the n8n JSON API / MQTT on PiLab) - actual
+# SSID/password live in sdkconfig.local (gitignored, not this file), merged
+# in automatically via CMakeLists.txt's SDKCONFIG_DEFAULTS setting. Kept
+# out of this file specifically because it IS meant to be committed and a
+# real WiFi password has no business in git history.
+
+# Voice control (espressif/esp-sr) - "Hi, ESP" wake word, then a custom
+# command list defined at runtime in lights_voice.c (app_sr_add_cmd()-style,
+# matching Espressif's own factory_demo for this exact board). English
+# only - explicit decision after confirming MultiNet has no Spanish
+# command-recognition support. MULTINET6_QUANT ("general english
+# recognition") is the "general"/dynamic-command model, not the older
+# static Kconfig-defined-command-list ones (those only support
+# MULTINET5_SINGLE_RECOGNITION and Chinese equivalents) - matches the
+# factory_demo's own proven config exactly.
+CONFIG_SR_WN_WN9_HIESP=y
+CONFIG_SR_MN_CN_NONE=y
+CONFIG_SR_MN_EN_MULTINET6_QUANT=y
+
+# 160MHz (this project's original default, set before voice control
+# existed) isn't enough real-time throughput for ESP-SR's AFE/WakeNet
+# processing - showed up as a continuous "AFE_SR: ERROR!
+# afe_feed_aec_init_false, rb_out slow!!!" warning starting within
+# seconds of boot regardless of whether anyone was actually talking, and
+# voice commands never got recognized. 240MHz is Espressif's own
+# documented requirement for real-time SR on ESP32-S3.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# 2026-09-15: pinning all 4 MQTT clients to core 0 (CONFIG_MQTT_TASK_
+# CORE_SELECTION_ENABLED / CONFIG_MQTT_USE_CORE_0) was tried as part of
+# that day's wake-word regression fix, on the theory that MQTT tasks
+# landing on core 1 (no default affinity) were contending with
+# detect_task/AFE's internal worker there. REVERTED same day: the actual
+# root cause turned out to be detect_task's own creation silently failing
+# under internal-RAM pressure (fixed properly by reordering main.c to run
+# lights_voice_init() first, before WiFi/MQTT claim any heap - see that
+# call site's comment) - core placement was never the real issue. Forcing
+# all 4 MQTT clients onto core 0 on top of WiFi's own driver task and
+# LVGL's rendering task turned out to cause a NEW regression instead:
+# systems_mqtt and lights_mqtt stopped connecting entirely (confirmed live
+# - the Systems screen and Lights screen's state sync both went dark),
+# while aircraft_mqtt/weather_mqtt happened to still get lucky. Left
+# unset (MQTT client tasks back to their library-default no-affinity
+# placement) - worth remembering if a future session is tempted to try
+# this same fix again for a similar-looking symptom.
+
+# LVGL heap in PSRAM via main/lv_mem_psram.c (2026-09-24) - the built-in
+# fixed pool lived in scarce internal SRAM and overflowed at 10 screens.
+# CONFIG_LV_USE_BUILTIN_MALLOC is not set
+CONFIG_LV_USE_CUSTOM_MALLOC=y
