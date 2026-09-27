@@ -87,6 +87,7 @@ so every behavior change is versioned and reviewable.
 | `firmware/box3/tools/` | Scripts that compile PNG icons/logos into C image descriptors |
 | `n8n/` | One script per workflow; each builds the workflow JSON and PUTs it to n8n |
 | `pilab-scripts/wx_nowcast.py` | Radar nowcast service (NOAA MRMS GRIB2 decoding) |
+| `pilab-scripts/wifi_watchdog.sh` (+ `.service`/`.timer`) | Wi-Fi self-heal watchdog for the server Pi: reconnects on a dead gateway or a "half-deaf" link, reboots as a last resort |
 | `docs/BUILD_NOTES.md` | Real problems found and how they were fixed |
 
 **Not included:** airline logos (airline trademarks) and icon image assets

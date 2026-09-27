@@ -1,0 +1,7 @@
+[Unit]
+Description=PiLab Wi-Fi self-heal watchdog (see wifi_watchdog.sh)
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wifi_watchdog.sh
