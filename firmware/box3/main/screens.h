@@ -19,6 +19,10 @@
 /* Night mode (2026-09-24, see wifi_time_is_night()): a motion wake between
  * 23:00 and 07:00 only comes up to this, not DISPLAY_BRIGHTNESS_PCT. */
 #define DISPLAY_NIGHT_BRIGHTNESS_PCT 5
+/* Idle (no motion/touch) levels - 2026-09-27, explicit request: day idle
+ * dims to 5% (was 1%), night idle to 1%. Touch stays live at both. */
+#define DISPLAY_IDLE_BRIGHTNESS_PCT 5
+#define DISPLAY_NIGHT_IDLE_BRIGHTNESS_PCT 1
 
 /* Secondary text (dates, subtitles, labels, footers) on every screen -
  * 2026-09-25, explicit request: LVGL's standard grey (#9E9E9E) was hard to

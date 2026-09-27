@@ -310,6 +310,16 @@ static bool s_display_asleep = false;
 static int s_idle_sec = 0;
 static bool s_was_night = false;
 
+static int active_brightness_pct(bool night)
+{
+    return night ? DISPLAY_NIGHT_BRIGHTNESS_PCT : DISPLAY_BRIGHTNESS_PCT;
+}
+
+static int idle_brightness_pct(bool night)
+{
+    return night ? DISPLAY_NIGHT_IDLE_BRIGHTNESS_PCT : DISPLAY_IDLE_BRIGHTNESS_PCT;
+}
+
 /* Hardware sensitivity (gain_cfg/delta_cfg in sensor_accessory.c) was
  * tuned down substantially after live testing showed the radar reading
  * "motion" continuously even with the user ~12m away in another room -
@@ -746,25 +756,24 @@ static void home_timer_cb(lv_timer_t *timer)
      * on one. If the sensor accessory isn't attached, this is a no-op and
      * the display just stays awake. */
     if (sensor_accessory_present()) {
-        /* Night mode transitions: at 23:00 the screen goes straight to
-         * sleep (1%) whatever it was doing; at 07:00 an awake screen
-         * comes back up from the night level to the normal one. */
+        /* Brightness levels, explicit request 2026-09-27: day 20% active /
+         * 5% idle, night (23:00-07:00) 5% active / 1% idle, touch live at
+         * every level. "Asleep" now only means "at the idle level" - the
+         * touch indev is never disabled any more (bsp_display_enter_sleep()
+         * is still never called, see git history for the GT911 I2C abort
+         * that ruled it out). At 23:00 the screen drops straight to the
+         * night idle level; at 07:00 it steps up to the day level for
+         * whichever state it's in. */
         bool night = wifi_time_is_night();
         if (night != s_was_night) {
             s_was_night = night;
             if (night) {
-                lv_indev_enable(bsp_display_get_input_dev(), false);
-                bsp_display_brightness_set(1);
                 s_display_asleep = true;
                 /* Needs fresh motion to wake - older samples don't count. */
                 memset(s_motion_history, 0, sizeof(s_motion_history));
-                ESP_LOGI(TAG, "night mode on - display to 1%%");
-            } else {
-                if (!s_display_asleep) {
-                    bsp_display_brightness_set(DISPLAY_BRIGHTNESS_PCT);
-                }
-                ESP_LOGI(TAG, "night mode off");
             }
+            bsp_display_brightness_set(s_display_asleep ? idle_brightness_pct(night) : active_brightness_pct(night));
+            ESP_LOGI(TAG, "night mode %s", night ? "on" : "off");
         }
 
         bool level = sensor_accessory_motion_level();
@@ -782,60 +791,28 @@ static void home_timer_cb(lv_timer_t *timer)
         ESP_LOGI(TAG, "motion raw=%d high_count=%d confirmed=%d idle_sec=%d asleep=%d", level, high_count, confirmed,
                  s_idle_sec, s_display_asleep);
 
-        if (confirmed) {
+        /* A touch counts as presence too - LVGL resets its inactivity
+         * timer on every press, and this tick runs every 3s. */
+        bool touched = lv_display_get_inactive_time(NULL) < 3000;
+
+        if (confirmed || touched) {
             s_idle_sec = 0;
             if (s_display_asleep) {
-                /* Backlight-only wake - see the sleep side below for why
-                 * bsp_display_exit_sleep() (which also wakes the touch
-                 * chip over I2C) is deliberately not used here.
-                 * bsp_display_backlight_on() itself hardcodes 100%
-                 * brightness - a real bug found 2026-09-14 while lowering
-                 * the dim level: every wake was silently jumping back to
-                 * full brightness regardless of whatever was set at boot,
-                 * which was very likely why the display kept feeling too
-                 * bright despite main.c's own dim setting - using
-                 * bsp_display_brightness_set() directly instead restores
-                 * the actual intended level. */
-                bsp_display_brightness_set(night ? DISPLAY_NIGHT_BRIGHTNESS_PCT : DISPLAY_BRIGHTNESS_PCT);
-                lv_indev_enable(bsp_display_get_input_dev(), true);
+                /* bsp_display_brightness_set(), not bsp_display_backlight_on()
+                 * - the latter hardcodes 100% (bug found 2026-09-14). */
+                bsp_display_brightness_set(active_brightness_pct(night));
                 s_display_asleep = false;
-                ESP_LOGI(TAG, "waking display (%s)", night ? "night, 5%" : "day");
+                ESP_LOGI(TAG, "waking display (%d%%, %s)", active_brightness_pct(night), touched ? "touch" : "motion");
             }
         } else if (!s_display_asleep) {
             s_idle_sec += 3;
             if (s_idle_sec >= (night ? NIGHT_IDLE_SLEEP_TIMEOUT_SEC : IDLE_SLEEP_TIMEOUT_SEC)) {
-                /* Backlight-only sleep, NOT bsp_display_enter_sleep() -
-                 * real bug, found via code inspection after a live crash:
-                 * bsp_display_enter_sleep() unconditionally chains into
-                 * the touch controller's own hardware sleep
-                 * (esp_lcd_touch_gt911_enter_sleep(), a single I2C
-                 * register write) after the backlight is already off, and
-                 * this project builds with CONFIG_BSP_ERROR_CHECK=y, so
-                 * ESP_ERROR_CHECK aborts the whole system on any I2C
-                 * hiccup on that write - and CONFIG_ESP_SYSTEM_PANIC_
-                 * PRINT_HALT=y means that abort halts forever instead of
-                 * rebooting. Screen stays dark, touch stays dead, only a
-                 * power cycle recovers it - and the very next sleep cycle
-                 * can hit the same I2C flake again. Disabling LVGL's
-                 * touch-polling indev (below) is sufficient on its own to
-                 * make touch inert while "asleep" - the touch chip's own
-                 * low-power mode was never actually needed for that, and
-                 * skipping it removes the fragile I2C round-trip
-                 * entirely. */
-                lv_indev_enable(bsp_display_get_input_dev(), false);
-                /* Dims to 1%, not a full bsp_display_backlight_off() -
-                 * explicit request 2026-09-15, once live data showed the
-                 * radar's raw signal is about equally noisy whether the
-                 * room is occupied or empty (a real environmental/gain
-                 * issue, not something the debounce window can fix - see
-                 * PROJECT.md). Dimming instead of a hard cutoff means a
-                 * false "confirmed" from that noise no longer causes a
-                 * jarring full-brightness flash back on - just a small
-                 * step up from near-black - while a genuinely empty room
-                 * still reads as effectively off. */
-                bsp_display_brightness_set(1);
+                /* Dim rather than backlight off (2026-09-15: the radar is
+                 * about as noisy in an empty room as an occupied one, so a
+                 * false wake should be a small step, not a flash). */
+                bsp_display_brightness_set(idle_brightness_pct(night));
                 s_display_asleep = true;
-                ESP_LOGI(TAG, "sleeping display (dimmed to 1%%)");
+                ESP_LOGI(TAG, "idle - display dimmed to %d%%", idle_brightness_pct(night));
             }
         }
     } else {
@@ -862,10 +839,6 @@ static void home_timer_cb(lv_timer_t *timer)
         if (any_expired) {
             recompute_notification_display();
         }
-    }
-
-    if (s_display_asleep) {
-        return;
     }
 
     update_sun_event_label();
