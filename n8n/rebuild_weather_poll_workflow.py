@@ -67,6 +67,23 @@ nowcast_query = (
     "WHERE n.key = 'wx_nowcast';"
 )
 
+# Consecutive-failure tracking for Fetch Forecast (2026-09-27). One
+# state_cache row while failing; any successful fetch deletes it. A row not
+# touched for 12+ min is a leftover from an earlier incident, so it restarts
+# the count instead of paging at once. page = 1 on the 3rd failure in a row.
+FORECAST_FAIL_PAGE_AFTER = 3
+clear_failure_query = "DELETE FROM homeops.state_cache WHERE key = 'wx_forecast_fail';"
+record_failure_query = (
+    "INSERT INTO homeops.state_cache AS s (key, value, updated_at) "
+    "VALUES ('wx_forecast_fail', jsonb_build_object('since', now(), 'fails', 1), now()) "
+    "ON CONFLICT (key) DO UPDATE SET updated_at = now(), value = CASE "
+    "  WHEN s.updated_at < now() - interval '12 minutes' THEN EXCLUDED.value "
+    "  ELSE jsonb_set(s.value, '{fails}', to_jsonb((s.value->>'fails')::int + 1)) END "
+    "RETURNING (value->>'fails')::int AS fails, "
+    "to_char((value->>'since')::timestamptz AT TIME ZONE 'America/New_York', 'HH12:MI AM') AS since_local, "
+    f"CASE WHEN (value->>'fails')::int >= {FORECAST_FAIL_PAGE_AFTER} THEN 1 ELSE 0 END AS page;"
+)
+
 format_js = r"""
 const om = $('Fetch Forecast').first().json;
 const current = om.current || {};
@@ -373,11 +390,53 @@ nodes = [
     },
     {
         # 3 tries, 5s apart: a momentary Open-Meteo/network blip (one hit
-        # 19:46 on day 1 and paged via the Error Handler) recovers silently;
-        # only a real outage (all 3 fail) still alerts.
+        # 19:46 on day 1 and paged via the Error Handler) recovers silently.
+        # 2026-09-27: a bad body that survived all 3 tries still paged, and
+        # the next poll was fine - not worth a Telegram. A failed poll now
+        # goes out the error output instead: nothing is published (the BOX-3
+        # keeps the retained last-good state) and it only pages once the
+        # forecast has failed 3 polls in a row (see Record Forecast Failure).
         "id": node_id(), "name": "Fetch Forecast", "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.5, "position": [220, 0], "retryOnFail": True, "maxTries": 3, "waitBetweenTries": 5000,
+        "onError": "continueErrorOutput",
         "parameters": {"url": weather_url, "options": {"timeout": 10000}},
+    },
+    {
+        "id": node_id(), "name": "Clear Forecast Failure", "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6, "position": [440, -180], "onError": "continueRegularOutput", "executeOnce": True,
+        "parameters": {"operation": "executeQuery", "query": clear_failure_query, "options": {}},
+        "credentials": {"postgres": POSTGRES_CRED},
+    },
+    {
+        "id": node_id(), "name": "Record Forecast Failure", "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6, "position": [440, 240], "executeOnce": True,
+        "parameters": {"operation": "executeQuery", "query": record_failure_query, "options": {}},
+        "credentials": {"postgres": POSTGRES_CRED},
+    },
+    {
+        "id": node_id(), "name": "Failing 3 Polls?", "type": "n8n-nodes-base.if",
+        "typeVersion": 2, "position": [660, 240],
+        "parameters": {
+            "conditions": {
+                "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict"},
+                "conditions": [{
+                    "id": node_id(),
+                    "leftValue": "={{ $json.page }}",
+                    "rightValue": 0,
+                    "operator": {"type": "number", "operation": "gt"},
+                }],
+                "combinator": "and",
+            },
+            "options": {},
+        },
+    },
+    {
+        # Throws -> the Error Handler pages (its 30-min quiet window keeps a
+        # long outage to one Telegram).
+        "id": node_id(), "name": "Forecast Down Alert", "type": "n8n-nodes-base.stopAndError",
+        "typeVersion": 1, "position": [880, 240],
+        "parameters": {"errorMessage": "=Open-Meteo forecast has failed {{ $json.fails }} polls in a row "
+                       "(since {{ $json.since_local }}). BOX-3 is showing the last good weather."},
     },
     # METAR / nowcast are optional inputs - a failure falls back to the
     # model inside Format Weather instead of failing the whole poll.
@@ -422,7 +481,14 @@ nodes = [
 connections = {
     "Every 5 min": {"main": [[{"node": "Fetch Forecast", "type": "main", "index": 0}]]},
     "Rain Change Webhook": {"main": [[{"node": "Fetch Forecast", "type": "main", "index": 0}]]},
-    "Fetch Forecast": {"main": [[{"node": "Fetch METAR", "type": "main", "index": 0}]]},
+    # Output 0 = success, output 1 = failed after all retries.
+    "Fetch Forecast": {"main": [
+        [{"node": "Fetch METAR", "type": "main", "index": 0},
+         {"node": "Clear Forecast Failure", "type": "main", "index": 0}],
+        [{"node": "Record Forecast Failure", "type": "main", "index": 0}],
+    ]},
+    "Record Forecast Failure": {"main": [[{"node": "Failing 3 Polls?", "type": "main", "index": 0}]]},
+    "Failing 3 Polls?": {"main": [[{"node": "Forecast Down Alert", "type": "main", "index": 0}], []]},
     "Fetch METAR": {"main": [[{"node": "Fetch Nowcast", "type": "main", "index": 0}]]},
     "Fetch Nowcast": {"main": [[{"node": "Format Weather", "type": "main", "index": 0}]]},
     "Format Weather": {
