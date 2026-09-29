@@ -13,7 +13,7 @@ static lv_obj_t *s_calls_label;
 
 void flightaware_screen_set_usage(int calls, double cost)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 

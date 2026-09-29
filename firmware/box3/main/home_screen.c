@@ -705,7 +705,7 @@ static void update_f1_session_badge(void)
 
 void home_screen_set_f1_session(const char *code, const char *gp, long long ends_at)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
     snprintf(s_f1_session_code, sizeof(s_f1_session_code), "%s", code ? code : "");
@@ -869,12 +869,13 @@ static void home_timer_cb(lv_timer_t *timer)
  * esp-box-3.h), so raising the timeout genuinely waits out that
  * contention instead of just giving up faster; 400ms comfortably covers a
  * full 200ms screen transition plus normal jitter while staying well
- * short of the 3s poll interval. Still bounded (not the 0=block-forever
- * lvgl_port_lock() supports) and now logs on failure so a genuine miss is
- * visible instead of silent. */
+ * short of the 3s poll interval. 2026-09-29: now ui_lock() (screens.h),
+ * which waits with no timeout - 400ms could still lose to a long render, and
+ * a lost sighting is exactly the bug above. The failure log stays in case
+ * ui_lock() is ever bounded again. */
 void home_screen_set_aircraft(const aircraft_info_t *info)
 {
-    if (!bsp_display_lock(400)) {
+    if (!ui_lock()) {
         ESP_LOGW(TAG, "Display lock timed out - dropped aircraft update for %s",
                  info->raw_flight ? info->raw_flight : "(unknown)");
         return;
@@ -988,7 +989,7 @@ void home_screen_clear_aircraft(void)
      * a dropped clear would leave stale aircraft info stuck on screen
      * indefinitely (or until the next successful sighting overwrites it),
      * which is worse than a dropped set. */
-    if (!bsp_display_lock(400)) {
+    if (!ui_lock()) {
         ESP_LOGW(TAG, "Display lock timed out - failed to clear aircraft display");
         return;
     }
@@ -1395,7 +1396,7 @@ void home_screen_set_notification_ex(const char *source, const char *message, co
     lv_color_t color = severity_color(severity);
     lv_color_t text_color = severity_text_color(severity);
 
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 
@@ -1497,7 +1498,7 @@ void home_screen_set_notification_ex(const char *source, const char *message, co
 
 void home_screen_clear_notification(const char *source)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 
@@ -1524,7 +1525,7 @@ void home_screen_clear_notification(const char *source)
  * task), same lock every setter above already takes. */
 int home_screen_get_unseen_notifications(notification_unseen_entry_t *out, int max)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return 0;
     }
 
@@ -1546,7 +1547,7 @@ int home_screen_get_unseen_notifications(notification_unseen_entry_t *out, int m
 
 void home_screen_dismiss_notification(const char *source)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 
@@ -1562,7 +1563,7 @@ void home_screen_dismiss_notification(const char *source)
 
 void home_screen_dismiss_all_notifications(void)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 
@@ -1637,7 +1638,7 @@ const lv_image_dsc_t *wx_icon_lookup(const char *name)
 /* Called from the MQTT client's task - takes the display lock itself. */
 void home_screen_set_weather(const weather_info_t *info)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 

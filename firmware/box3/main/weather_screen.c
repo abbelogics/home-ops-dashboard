@@ -216,7 +216,7 @@ static void set_radar_line(const cJSON *radar)
 
 void weather_screen_update(const cJSON *root)
 {
-    if (!root || !bsp_display_lock(100)) {
+    if (!root || !ui_lock()) {
         return;
     }
 

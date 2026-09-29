@@ -117,7 +117,7 @@ static void volume_event_cb(lv_event_t *event)
 void spotify_screen_set_state(bool is_playing, const char *track, const char *artist, const char *device,
                                int volume_percent)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 

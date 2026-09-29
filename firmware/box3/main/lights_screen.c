@@ -44,7 +44,7 @@ static void button_click_cb(lv_event_t *event)
  * matches what was just requested. */
 void lights_screen_set_state(bool on)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 
@@ -96,7 +96,7 @@ static void slider_event_cb(lv_event_t *event)
  * request) can't yank the slider out from under an in-progress drag. */
 void lights_screen_set_brightness(int bri)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 
@@ -112,7 +112,7 @@ void lights_screen_set_brightness(int bri)
  * display lock itself. */
 void lights_screen_set_voice_status(const char *status)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 

@@ -38,7 +38,7 @@ static void format_reset(int minutes, char *buf, size_t buf_len)
 
 void codex_usage_screen_set_usage(int pct_5h, int reset_min_5h, int pct_weekly, int reset_min_weekly)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 

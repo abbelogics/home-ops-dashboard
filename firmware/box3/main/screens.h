@@ -2,7 +2,22 @@
 
 #include <stdbool.h>
 
+#include "bsp/esp-box-3.h"
 #include "lvgl.h"
+
+/* Display lock for screen setters. Waits (no timeout) instead of the old
+ * bsp_display_lock(100)/(400), which silently dropped the update whenever
+ * the LVGL task was mid-render - worst in the retained-message burst after
+ * a reconnect (2026-09-29: FX EUR/GBP stuck at "--" for hours). Can't
+ * deadlock: the display mutex is recursive (setters called from LVGL
+ * timers/touch handlers re-enter fine) and it's the only lock callers
+ * take - voice/alert/webhook hand-offs are non-blocking queue sends.
+ * Keep it that way: never call a setter while holding another lock the
+ * LVGL task could wait on. */
+static inline bool ui_lock(void)
+{
+    return bsp_display_lock(0);
+}
 
 /* Screens cycle in this order when the display is tapped. */
 #define SCREEN_COUNT 11

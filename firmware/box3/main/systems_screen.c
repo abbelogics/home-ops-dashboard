@@ -84,7 +84,7 @@ static void add_status_row(lv_obj_t *parent, const char *key, const char *name)
 
 void systems_screen_set_status(const char *key, const system_status_t *status)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 

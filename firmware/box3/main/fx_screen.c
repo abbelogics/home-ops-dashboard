@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "bsp/esp-box-3.h"
+#include "freertos/FreeRTOS.h"
 #include "screens.h"
 #include "ui_icons/ui_icons.h"
 
@@ -58,19 +59,51 @@ static void format_date(char *buf, size_t len, const char *iso)
     }
 }
 
+/* Latest rates from MQTT, drawn by fx_apply_timer_cb in the LVGL task.
+ * fx_screen_set_rate used to draw directly behind bsp_display_lock(100) and
+ * silently dropped the update on a timeout - which is what happened to
+ * EUR/GBP in the retained-message burst right after a reconnect
+ * (2026-09-29: COP drew, EUR/GBP stayed "--"). Since n8n only republishes
+ * on change, a dropped row stayed blank until the next ECB rate. Storing
+ * here and drawing from an lv_timer (already holds the display lock)
+ * can't drop anything. */
+typedef struct {
+    bool dirty;
+    double rate;
+    bool has_prev;
+    double prev;
+    char date[12];
+} fx_pending_t;
+
+static fx_pending_t s_pending[3];
+static portMUX_TYPE s_pending_lock = portMUX_INITIALIZER_UNLOCKED;
+
 void fx_screen_set_rate(fx_currency_t which, double rate, bool has_prev, double prev, const char *date)
 {
-    if (which < 0 || which > FX_GBP || !bsp_display_lock(100)) {
+    if (which < 0 || which > FX_GBP) {
         return;
     }
+    taskENTER_CRITICAL(&s_pending_lock);
+    fx_pending_t *p = &s_pending[which];
+    p->rate = rate;
+    p->has_prev = has_prev;
+    p->prev = prev;
+    strlcpy(p->date, date ? date : "", sizeof(p->date));
+    p->dirty = true;
+    taskEXIT_CRITICAL(&s_pending_lock);
+}
+
+static void draw_rate(fx_currency_t which, const fx_pending_t *p)
+{
     fx_row_t *row = &s_rows[which];
+    double rate = p->rate;
 
     char text[32];
     format_rate(text, sizeof(text), rate, row->decimals);
     lv_label_set_text(row->value, text);
 
-    if (has_prev) {
-        double diff = rate - prev;
+    if (p->has_prev) {
+        double diff = rate - p->prev;
         char d[24];
         format_rate(d, sizeof(d), diff < 0 ? -diff : diff, row->decimals);
         /* Compare at display precision so a sub-precision wobble reads as
@@ -89,11 +122,24 @@ void fx_screen_set_rate(fx_currency_t which, double rate, bool has_prev, double 
         lv_label_set_text(row->change, "");
     }
 
-    format_date(which == FX_COP ? s_trm_date : s_ecb_date, sizeof(s_trm_date), date);
+    format_date(which == FX_COP ? s_trm_date : s_ecb_date, sizeof(s_trm_date), p->date);
     lv_label_set_text_fmt(s_footer, "TRM %s   |   ECB %s", s_trm_date[0] ? s_trm_date : "--",
                           s_ecb_date[0] ? s_ecb_date : "--");
+}
 
-    bsp_display_unlock();
+static void fx_apply_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    for (int i = FX_COP; i <= FX_GBP; i++) {
+        fx_pending_t p;
+        taskENTER_CRITICAL(&s_pending_lock);
+        p = s_pending[i];
+        s_pending[i].dirty = false;
+        taskEXIT_CRITICAL(&s_pending_lock);
+        if (p.dirty) {
+            draw_rate((fx_currency_t)i, &p);
+        }
+    }
 }
 
 static lv_obj_t *plain_row(lv_obj_t *parent, int gap)
@@ -213,6 +259,7 @@ lv_obj_t *fx_screen_create(void)
     lv_obj_align(s_footer, LV_ALIGN_BOTTOM_MID, 0, -34);
 
     screens_add_page_dots(scr, SCREEN_FX);
+    lv_timer_create(fx_apply_timer_cb, 500, NULL);
 
     return scr;
 }

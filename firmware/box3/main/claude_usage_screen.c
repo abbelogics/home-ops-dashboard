@@ -72,7 +72,7 @@ static void format_reset(int minutes, char *buf, size_t buf_len)
 
 void claude_usage_screen_set_usage(int session_pct, int session_reset_min, int week_pct, int week_reset_min)
 {
-    if (!bsp_display_lock(100)) {
+    if (!ui_lock()) {
         return;
     }
 
