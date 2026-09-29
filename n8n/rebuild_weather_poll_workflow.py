@@ -103,13 +103,18 @@ try {
 
 let skyRank = null, skySource = 'model';
 if (metar && Array.isArray(metar.clouds)) {
-  let low = 0, high = 0;
+  let low = 0, high = 0, broken = 0;
   for (const c of metar.clouds) {
     const r = COVER_RANK[c.cover] ?? 0;
+    if (r >= 3) broken++;
     if (c.base === null || c.base === undefined || c.base < 20000) low = Math.max(low, r);
     else high = Math.max(high, r);
   }
   skyRank = Math.max(low, high >= 3 ? 2 : 0);
+  // 2026-09-29: stacked decks (e.g. BKN070 BKN140 OVC200) leave no sun
+  // showing - a BKN below any other BKN/OVC layer reads as overcast, not the
+  // sun-behind-cloud "Mostly Cloudy" (it was dark and raining that morning).
+  if (skyRank === 3 && broken >= 2) skyRank = 4;
   skySource = 'metar';
 }
 if (skyRank === null) {
@@ -144,6 +149,11 @@ if (nc) {
   rate = nc.rate_mmhr;
   // AMS rain-rate classes: light < 2.5, moderate 2.5-7.6, heavy > 7.6 mm/h.
   // 0.2 mm/h floor filters radar noise / virga.
+  // 2026-09-29: the office cell alone missed rain that was falling here
+  // (cell 0.0, rain 0.9 mi away, 4.3 mm/h in the 3x3 box). The frame is ~3 min
+  // old and cells drift, so rain in the ~1 km ring counts as rain here.
+  const near = nc.rate_near_max_mmhr ?? 0;
+  if (rate < 0.2 && near >= 0.5) { rate = near; rainSource = 'mrms_near'; }
   if (rate >= 0.2) intensity = rate < 2.5 ? 'light' : rate <= 7.6 ? 'moderate' : 'heavy';
 } else {
   rainSource = 'model';
