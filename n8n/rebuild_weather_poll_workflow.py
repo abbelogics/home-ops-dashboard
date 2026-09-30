@@ -115,6 +115,11 @@ if (metar && Array.isArray(metar.clouds)) {
   // showing - a BKN below any other BKN/OVC layer reads as overcast, not the
   // sun-behind-cloud "Mostly Cloudy" (it was dark and raining that morning).
   if (skyRank === 3 && broken >= 2) skyRank = 4;
+  // 2026-09-30: a solid high deck (KMIA FEW035 SCT130 OVC250, model 100%)
+  // hides the sun and looks gloomy, but the cirrus cap above rated it
+  // "partly". When the model agrees it's cloudy (>= 88%), a high OVC = overcast,
+  // a high BKN = mostly cloudy. Thin cirrus with a low model cover is unchanged.
+  if ((current.cloud_cover ?? 0) >= 88 && high >= 3) skyRank = Math.max(skyRank, high);
   skySource = 'metar';
 }
 if (skyRank === null) {

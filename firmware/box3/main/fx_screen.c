@@ -111,8 +111,10 @@ static void draw_rate(fx_currency_t which, const fx_pending_t *p)
         char zero[24];
         format_rate(zero, sizeof(zero), 0, row->decimals);
         if (strcmp(d, zero) == 0) {
-            lv_label_set_text(row->change, "=");
-            lv_obj_set_style_text_color(row->change, UI_TEXT_SECONDARY, 0);
+            /* Unchanged reads as a plain white zero change ("0.00000"), not
+             * a lone "=" (user: "just have 0.000 in white"). */
+            lv_label_set_text(row->change, zero);
+            lv_obj_set_style_text_color(row->change, lv_color_white(), 0);
         } else {
             lv_label_set_text_fmt(row->change, "%s %s", diff > 0 ? LV_SYMBOL_UP : LV_SYMBOL_DOWN, d);
             lv_obj_set_style_text_color(row->change,
