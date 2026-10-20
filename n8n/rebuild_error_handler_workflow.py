@@ -75,17 +75,45 @@ SELECT prev_suppressed FROM t WHERE send_now;
 # through. Zero-row output = stop (same no-If-node pattern as Throttle).
 # Prefix match: n8n appends " [line N]" when a Code node itself throws.
 # Values are query parameters, never pasted into the SQL text.
-gate_query = """
+# Fast-poller gate (2026-10-20): workflows that run every <= 2 min hit
+# one-off upstream blips (Calendar Check: Google API "timeout of 30000ms"
+# 3x one morning, each a Telegram) and n8n restarts. Ale: these "are not
+# helping". A real outage on a 2s-2min poller fails run after run, so these
+# workflows only alert on their 3rd error within 10 min (any error, not just
+# runner timeouts). Slower/daily workflows keep the rule below unchanged.
+# Calendar Check left this list the same day: it moved to 5 min + 5 tries
+# per run, so 3 errors in 10 min could never happen there.
+FAST_POLLER_IDS = [
+    "YOUR_WORKFLOW_ID",  # Aircraft Poll (2s)
+    "YOUR_WORKFLOW_ID",  # F1 Sessions (1 min)
+    "YOUR_WORKFLOW_ID",  # Lights Control (30s)
+    "YOUR_WORKFLOW_ID",  # NWS Alerts (2 min)
+    "YOUR_WORKFLOW_ID",  # Spotify Now Playing (5s)
+    "YOUR_WORKFLOW_ID",  # System Health Check (30s)
+]
+fast_ids_sql = "ARRAY[" + ", ".join(f"'{i}'" for i in FAST_POLLER_IDS) + "]"
+
+# Data-modifying CTEs don't see each other's rows, hence the "+ 1" for the
+# error being logged right now.
+gate_query = f"""
 WITH prev AS (
   SELECT last_seen FROM homeops.task_timeout_seen WHERE workflow_id = $1
 ), up AS (
   INSERT INTO homeops.task_timeout_seen (workflow_id, last_seen)
   SELECT $1, now() WHERE $2 LIKE 'Task request timed out%'
   ON CONFLICT (workflow_id) DO UPDATE SET last_seen = now()
+), log AS (
+  INSERT INTO homeops.error_seen (workflow_id, seen_at) VALUES ($1, now())
+), prune AS (
+  DELETE FROM homeops.error_seen WHERE seen_at < now() - interval '1 day'
 )
 SELECT 1 AS pass
-WHERE $2 NOT LIKE 'Task request timed out%'
-   OR EXISTS (SELECT 1 FROM prev WHERE last_seen > now() - interval '15 minutes');
+WHERE CASE WHEN $1 = ANY({fast_ids_sql})
+  THEN (SELECT count(*) FROM homeops.error_seen
+        WHERE workflow_id = $1 AND seen_at > now() - interval '10 minutes') + 1 >= 3
+  ELSE $2 NOT LIKE 'Task request timed out%'
+    OR EXISTS (SELECT 1 FROM prev WHERE last_seen > now() - interval '15 minutes')
+END;
 """.strip()
 gate_params = ("={{ [String($json.workflow.id || 'unknown'), "
                "String(($json.execution && $json.execution.error && $json.execution.error.message) || '')] }}")

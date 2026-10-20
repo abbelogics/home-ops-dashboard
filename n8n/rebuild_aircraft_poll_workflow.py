@@ -882,6 +882,7 @@ const CALLSIGN_FLIGHT_NUMBER_OVERRIDES = {
   THY4JD: '157',
   THY41J: '158',
   THY99D: '078',
+  THY6622: '078',  // 2026-10-05: 77L evening MIA->IST (~22:00-22:35), 3 FA-sourced sightings; user: TK78
   FBU98B: '743',   // French bee MIA->ORY ~22:00 (board: BF743 only)
   LOT3PK: '030',   // LOT MIA->WAW ~20:00-22:30 (board: LO030 only)
   AAL870Q: '1870', // AA MSP->MIA ~10:30 (board: AA1870, only AA from MSP)

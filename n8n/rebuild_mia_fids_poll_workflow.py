@@ -188,6 +188,11 @@ nodes = [
         "typeVersion": 4.5, "position": [660, 0], "onError": "continueRegularOutput",
         "parameters": {
             "url": "https://aeroapi.flightaware.com/aeroapi/account/usage",
+            # Without ?start the endpoint reports the PREVIOUS period
+            # (2026-10-03: showed September's totals after the reset while
+            # the web dashboard showed October's). Pin to the 1st (UTC).
+            "sendQuery": True,
+            "queryParameters": {"parameters": [{"name": "start", "value": "={{ $now.toUTC().toFormat('yyyy-MM-01') }}"}]},
             "sendHeaders": True,
             "headerParameters": {"parameters": [{"name": "x-apikey", "value": FLIGHTAWARE_KEY}]},
             "options": {"timeout": 5000},

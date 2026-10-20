@@ -40,7 +40,21 @@ build_message_js = """
 // comment. On that path it emits one placeholder item (`{}`) instead of
 // zero, which a real event never looks like (every real Google Calendar
 // event has an `id`) - filtered out here before anything else runs.
-const rawEvents = $input.all().map((item) => item.json).filter((ev) => ev && ev.id);
+const allItems = $input.all().flatMap((item) => (item.json && Array.isArray(item.json.items) ? item.json.items : [item.json]));
+
+// "Get Today's Events" is set to continue on error, so a failed Google call
+// (revoked/expired OAuth token, API outage) arrives here as an `{error}`
+// item that looks just like an empty day and used to publish the clear
+// message - silently hiding the banner (2026-10-01: a revoked credential
+// blanked an all-day event). Throw instead: nothing is published, so the
+// last banner stays, and the run fails into the shared Error Handler
+// (throttled to one Telegram per incident).
+const failed = allItems.find((ev) => ev && ev.error);
+if (failed) {
+  throw new Error('Google Calendar fetch failed: ' + (typeof failed.error === 'string' ? failed.error : JSON.stringify(failed.error)));
+}
+
+const rawEvents = allItems.filter((ev) => ev && ev.id);
 
 // Only show a timed event during its own start-to-end window, not any
 // time beforehand once it's on the calendar and not after it's over -
@@ -133,12 +147,15 @@ nodes = [
         # project already polls Spotify every 15s with no issue) - the
         # 15-minute interval was never a rate-limit necessity, just the
         # original default.
+        # 30s -> 5 min, 2026-10-20: Ale traded new-event latency for quiet
+        # after Google API timeouts paged 3x one morning (see retries on
+        # Get Today's Events).
         "id": node_id(),
-        "name": "Every 30s",
+        "name": "Every 5 min",
         "type": "n8n-nodes-base.scheduleTrigger",
         "typeVersion": 1.3,
         "position": [0, 0],
-        "parameters": {"rule": {"interval": [{"field": "seconds", "secondsInterval": 30}]}},
+        "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}},
     },
     {
         # Explicit start/end-of-day expressions (Luxon, via n8n's $today)
@@ -183,21 +200,41 @@ nodes = [
         # a real `id` field before treating anything as an actual event.
         "id": node_id(),
         "name": "Get Today's Events",
-        "type": "n8n-nodes-base.googleCalendar",
-        "typeVersion": 1.3,
+        # Service account (no OAuth consent-screen/7-day-token problem) -
+        # the Google Calendar node only supports OAuth2, so this calls
+        # the Calendar REST API directly with the googleApi credential.
+        # A service account has no "primary" calendar; the user's own
+        # calendar is shared with it (read-only) and addressed by email.
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
         "position": [440, 0],
         "parameters": {
-            "resource": "event",
-            "operation": "getAll",
-            "calendar": {"__rl": True, "mode": "list", "value": "primary"},
-            "timeMin": "={{ $json.timeMin }}",
-            "timeMax": "={{ $json.timeMax }}",
+            "method": "GET",
+            "url": "https://www.googleapis.com/calendar/v3/calendars/user@example.com/events",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "googleApi",
+            "sendQuery": True,
+            "queryParameters": {
+                "parameters": [
+                    {"name": "timeMin", "value": "={{ $json.timeMin }}"},
+                    {"name": "timeMax", "value": "={{ $json.timeMax }}"},
+                    {"name": "singleEvents", "value": "true"},
+                    {"name": "orderBy", "value": "startTime"},
+                    {"name": "maxResults", "value": "50"},
+                ]
+            },
             "options": {},
-            "returnAll": True,
         },
-        "credentials": {"googleCalendarOAuth2Api": GOOGLE_CALENDAR_CRED},
+        "credentials": {"googleApi": {"id": "YOUR_N8N_CREDENTIAL_ID", "name": "Google Service Account account"}},
         "onError": "continueRegularOutput",
         "alwaysOutputData": True,
+        # 2026-10-20: one-off "timeout of 30000ms exceeded" from Google -
+        # retry inside the run instead of failing it. 5 tries = n8n's max;
+        # Ale wanted 30s between tries but n8n caps the wait at 5s, so more
+        # tries instead (~3 min of coverage with 30s request timeouts).
+        "retryOnFail": True,
+        "maxTries": 5,
+        "waitBetweenTries": 5000,
     },
     {
         "id": node_id(),
@@ -219,7 +256,7 @@ nodes = [
 ]
 
 connections = {
-    "Every 30s": {"main": [[{"node": "Compute Today Range", "type": "main", "index": 0}]]},
+    "Every 5 min": {"main": [[{"node": "Compute Today Range", "type": "main", "index": 0}]]},
     "Compute Today Range": {"main": [[{"node": "Get Today's Events", "type": "main", "index": 0}]]},
     "Get Today's Events": {"main": [[{"node": "Build Notification", "type": "main", "index": 0}]]},
     "Build Notification": {"main": [[{"node": "Publish Notification", "type": "main", "index": 0}]]},

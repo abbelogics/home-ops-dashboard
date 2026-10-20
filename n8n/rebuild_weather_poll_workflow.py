@@ -120,6 +120,10 @@ if (metar && Array.isArray(metar.clouds)) {
   // "partly". When the model agrees it's cloudy (>= 88%), a high OVC = overcast,
   // a high BKN = mostly cloudy. Thin cirrus with a low model cover is unchanged.
   if ((current.cloud_cover ?? 0) >= 88 && high >= 3) skyRank = Math.max(skyRank, high);
+  // 2026-10-01: KMIA FEW025 SCT048 BKN080 with model 100% (user: solid grey
+  // overcast, no sun) rated "Mostly Cloudy" = sun-behind-cloud icon. The model
+  // at >= 95% plus any BKN layer means no sun shows - overcast.
+  if ((current.cloud_cover ?? 0) >= 95 && skyRank === 3) skyRank = 4;
   skySource = 'metar';
 }
 if (skyRank === null) {
@@ -168,7 +172,11 @@ if (nc) {
   intensity = MODEL_RAIN[code] || null;
 }
 const snowing = (nc && nc.precip_type === 'snow') || (!nc && [71, 73, 75, 77, 85, 86].includes(code));
-const fog = !intensity && (/(^|\s|-|\+)(FG|BR)/.test(metarWx) ? metar.visib !== '10+' : [45, 48].includes(code) && !metar);
+// 2026-10-20: only FG is fog. BR (mist, vis >= 5/8 SM) showed the fog icon
+// under KMIA "3SM +RA BR" with a dry office cell - Ale: mist -> cloudy.
+// Patches (BCFG) and shallow (MIFG) fog still count as fog.
+const fog = !intensity && (/(^|\s|-|\+)(BC|MI)?FG/.test(metarWx) ? metar.visib !== '10+' : [45, 48].includes(code) && !metar);
+const mist = !intensity && !fog && /(^|\s|-|\+)BR/.test(metarWx);
 
 let icon, desc;
 if (intensity) {
@@ -182,6 +190,7 @@ if (intensity) {
   else if (intensity === 'light') { icon = 'rain_light'; desc = 'Light Rain'; }
   else { icon = 'rain'; desc = 'Rain'; }
 } else if (fog) { icon = 'fog'; desc = 'Fog'; }
+else if (mist) { icon = 'cloudy'; desc = 'Cloudy'; }
 else { icon = isDay ? skyDayIcon : skyNightIcon; desc = skyDesc; }
 
 // Firmware before the 2026-09-24 icon set only knows these 9 keys (unknown
